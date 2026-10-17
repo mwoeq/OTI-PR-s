@@ -1,0 +1,3 @@
+spark/jars/*.jar
+*.log.tmp
+.DS_Store

@@ -1,0 +1,54 @@
+Spark Web UI available at http://0adee8cd8e7b:4040
+Spark master: local[*], Application Id: local-1792251996455
+lakehouse
+Time taken: 4.919 seconds, Fetched 1 row(s)
+Time taken: 1.98 seconds, Fetched 3 row(s)
+customer
+orders
+lineitem
+orderkey            	bigint              	                    
+partkey             	bigint              	                    
+suppkey             	bigint              	                    
+linenumber          	int                 	                    
+quantity            	double              	                    
+extendedprice       	double              	                    
+discount            	double              	                    
+tax                 	double              	                    
+returnflag          	string              	                    
+linestatus          	string              	                    
+shipdate            	date                	                    
+commitdate          	date                	                    
+receiptdate         	date                	                    
+shipinstruct        	string              	                    
+shipmode            	string              	                    
+comment             	string              	                    
+_loaded_at          	timestamp           	                    
+_source             	string              	                    
+# Partitioning      	                    	                    
+Part 0              	years(shipdate)     	                    
+Time taken: 0.441 seconds, Fetched 21 row(s)
+customer	1500000
+orders	15000000
+lineitem	59986052
+Time taken: 8.074 seconds, Fetched 3 row(s)
+Time taken: 0.847 seconds, Fetched 1 row(s)
+4595932919969407211	2026-10-17 15:22:02.198	append	59986052
+{"shipdate_year":22}	7595510	1
+{"shipdate_year":23}	9109641	1
+{"shipdate_year":24}	9099165	1
+{"shipdate_year":25}	9106637	1
+{"shipdate_year":26}	9123688	2
+{"shipdate_year":27}	9102166	1
+{"shipdate_year":28}	6849245	1
+Time taken: 0.711 seconds, Fetched 7 row(s)
+Time taken: 49.308 seconds, Fetched 10 row(s)
+4791171	440715.2185	1995-02-23	0
+46678469	439855.32499999995	1995-01-27	0
+23906758	432728.57369999995	1995-03-14	0
+23861382	428739.1368	1995-03-09	0
+59393639	426036.0662	1995-02-12	0
+3355202	425100.6657	1995-03-04	0
+9806272	425088.0568	1995-03-13	0
+22810436	423231.969	1995-01-02	0
+16384100	421478.72940000007	1995-03-02	0
+52974151	415367.11950000003	1995-02-05	0

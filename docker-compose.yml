@@ -1,0 +1,83 @@
+# Локальный Lakehouse для практической №1 (вариант 1, TPC-H Q3)
+# Стек: Silo (MinIO-форк, S3) -> PostgreSQL -> Lakekeeper (Iceberg REST) -> Trino
+# Запуск:   docker compose up -d   (затем scripts/01_init_catalog.sh)
+# Остановка: docker compose stop   | Полная очистка: docker compose down -v
+
+name: lakehouse-p1
+
+services:
+  # S3-совместимое объектное хранилище: сюда физически падают parquet-файлы
+  minio:
+    image: pgsty/silo:latest            # свободный форк MinIO (quay.io/minio/* теперь отдаёт 401)
+    container_name: lh-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # веб-консоль
+    volumes:
+      - p1-minio-data:/data
+
+  # одноразовый контейнер: создаёт бакеты под слои медальона
+  minio-init:
+    image: pgsty/mc:latest
+    container_name: lh-minio-init
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set m http://lh-minio:9000 minioadmin minioadmin; do sleep 1; done;
+      mc mb --ignore-existing m/bronze m/silver m/gold;
+      "
+
+  # БД, в которой Lakekeeper хранит метаданные каталога (namespaces, таблицы, указатели на metadata.json)
+  postgres:
+    image: postgres:17
+    container_name: lh-postgres
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - p1-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      retries: 30
+
+  # одноразовая миграция схемы БД Lakekeeper
+  lakekeeper-migrate:
+    image: quay.io/lakekeeper/catalog:latest-main
+    container_name: lh-lakekeeper-migrate
+    command: migrate
+    environment: &lk-env
+      LAKEKEEPER__PG_ENCRYPTION_KEY: "This-is-NOT-Secure!"
+      LAKEKEEPER__PG_DATABASE_URL_READ: postgresql://postgres:postgres@lh-postgres:5432/postgres
+      LAKEKEEPER__PG_DATABASE_URL_WRITE: postgresql://postgres:postgres@lh-postgres:5432/postgres
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # Iceberg REST Catalog
+  lakekeeper:
+    image: quay.io/lakekeeper/catalog:latest-main
+    container_name: lh-lakekeeper
+    command: serve
+    environment: *lk-env
+    ports:
+      - "8181:8181"   # REST API + UI (http://localhost:8181/ui/)
+    depends_on:
+      lakekeeper-migrate: { condition: service_completed_successfully }
+
+  # SQL-движок: метаданные берёт у Lakekeeper, данные читает/пишет в Silo
+  trino:
+    image: trinodb/trino:476
+    container_name: trino
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./catalog:/etc/trino/catalog   # bronze/silver/gold (Iceberg) + tpch (генератор)
+      - ./trino/config.properties:/etc/trino/config.properties   # поднятый лимит памяти запроса
+    depends_on: [lakekeeper, minio-init]
+
+volumes:
+  p1-minio-data:
+  p1-pg-data:

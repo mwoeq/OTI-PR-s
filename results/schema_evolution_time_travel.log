@@ -1,0 +1,140 @@
+=== SCHEMA EVOLUTION ===
+
+### 0. Исходная схема и файлы
+-- SQL: DESCRIBE silver.lakehouse.fct_order_lines
+    Column     |     Type      | Extra | Comment 
+---------------+---------------+-------+---------
+ orderkey      | bigint        |       |         
+ linenumber    | integer       |       |         
+ custkey       | bigint        |       |         
+ mktsegment    | varchar       |       |         
+ orderdate     | date          |       |         
+ shippriority  | integer       |       |         
+ shipdate      | date          |       |         
+ ship_lag_days | bigint        |       |         
+ extendedprice | decimal(15,2) |       |         
+ discount      | decimal(4,2)  |       |         
+ net_revenue   | decimal(18,4) |       |         
+(11 rows)
+
+### 0. Снапшоты до изменений
+-- SQL: SELECT snapshot_id, committed_at, operation FROM silver.lakehouse."fct_order_lines$snapshots" ORDER BY committed_at
+     snapshot_id     |        committed_at         | operation 
+---------------------+-----------------------------+-----------
+ 8034425915360202040 | 2026-10-17 15:23:17.565 UTC | append    
+(1 row)
+snapshot S0 = 8034425915360202040, файлов данных = 1
+
+### 1. ADD COLUMN gross_revenue (выручка без скидки)
+-- SQL: ALTER TABLE silver.lakehouse.fct_order_lines ADD COLUMN gross_revenue decimal(18,4)
+
+### 1a. Старые строки получили NULL, файлы НЕ переписаны
+-- SQL: SELECT count(*) AS rows, count(gross_revenue) AS filled, (SELECT count(*) FROM silver.lakehouse."fct_order_lines$files") AS data_files FROM silver.lakehouse.fct_order_lines
+  rows  | filled | data_files 
+--------+--------+------------
+ 302114 |      0 |          1 
+(1 row)
+
+### 2. Заполняем новую колонку (UPDATE = новый снапшот)
+-- SQL: UPDATE silver.lakehouse.fct_order_lines SET gross_revenue = extendedprice
+
+### 2a. Проверка
+-- SQL: SELECT count(gross_revenue) AS filled, sum(gross_revenue) - sum(net_revenue) AS discount_total FROM silver.lakehouse.fct_order_lines
+ filled | discount_total 
+--------+----------------
+ 302114 | 577717722.6778 
+(1 row)
+
+### 3. RENAME COLUMN ship_lag_days -> days_to_ship
+-- SQL: ALTER TABLE silver.lakehouse.fct_order_lines RENAME COLUMN ship_lag_days TO days_to_ship
+
+### 3a. Новая схема
+-- SQL: DESCRIBE silver.lakehouse.fct_order_lines
+    Column     |     Type      | Extra | Comment 
+---------------+---------------+-------+---------
+ orderkey      | bigint        |       |         
+ linenumber    | integer       |       |         
+ custkey       | bigint        |       |         
+ mktsegment    | varchar       |       |         
+ orderdate     | date          |       |         
+ shippriority  | integer       |       |         
+ shipdate      | date          |       |         
+ days_to_ship  | bigint        |       |         
+ extendedprice | decimal(15,2) |       |         
+ discount      | decimal(4,2)  |       |         
+ net_revenue   | decimal(18,4) |       |         
+ gross_revenue | decimal(18,4) |       |         
+(12 rows)
+
+### 3b. Чтение старого снапшота S0 — там ещё старая схема (без gross_revenue)
+-- SQL: SELECT * FROM silver.lakehouse.fct_order_lines FOR VERSION AS OF 8034425915360202040 ORDER BY orderkey, linenumber LIMIT 3
+ orderkey | linenumber | custkey | mktsegment | orderdate  | shippriority |  shipdate  | ship_lag_days | extendedprice | discount | net_revenue 
+----------+------------+---------+------------+------------+--------------+------------+---------------+---------------+----------+-------------
+      359 |          4 |  775994 | BUILDING   | 1994-12-19 |            0 | 1995-03-30 |           101 |      70064.40 |     0.10 |  63057.9600 
+      386 |          1 |  601091 | BUILDING   | 1995-01-25 |            0 | 1995-05-10 |           105 |      41845.83 |     0.10 |  37661.2470 
+      386 |          2 |  601091 | BUILDING   | 1995-01-25 |            0 | 1995-04-12 |            77 |      19267.04 |     0.06 |  18111.0176 
+(3 rows)
+
+### 3c. Текущая версия
+-- SQL: SELECT orderkey, linenumber, days_to_ship, net_revenue, gross_revenue FROM silver.lakehouse.fct_order_lines ORDER BY orderkey, linenumber LIMIT 3
+ orderkey | linenumber | days_to_ship | net_revenue | gross_revenue 
+----------+------------+--------------+-------------+---------------
+      359 |          4 |          101 |  63057.9600 |    70064.4000 
+      386 |          1 |          105 |  37661.2470 |    41845.8300 
+      386 |          2 |           77 |  18111.0176 |    19267.0400 
+(3 rows)
+
+=== TIME TRAVEL: ошибочное удаление и восстановление ===
+последний хороший снапшот GOOD = 8706057299756576312 (2026-10-17 15:45:39.314 UTC)
+
+### 4. Сколько строк до аварии
+-- SQL: SELECT count(*) AS rows, sum(net_revenue) AS revenue FROM silver.lakehouse.fct_order_lines
+  rows  |     revenue      
+--------+------------------
+ 302114 | 10975761617.9122 
+(1 row)
+
+### 5. 'Авария': случайно удалили все заказы 1995 года
+-- SQL: DELETE FROM silver.lakehouse.fct_order_lines WHERE orderdate >= DATE '1995-01-01'
+
+### 5a. После удаления
+-- SQL: SELECT count(*) AS rows, sum(net_revenue) AS revenue FROM silver.lakehouse.fct_order_lines
+ rows  |     revenue     
+-------+-----------------
+ 47080 | 1711571907.5824 
+(1 row)
+
+### 6. Time travel: данные на момент GOOD по id снапшота
+-- SQL: SELECT count(*) AS rows, sum(net_revenue) AS revenue FROM silver.lakehouse.fct_order_lines FOR VERSION AS OF 8706057299756576312
+  rows  |     revenue      
+--------+------------------
+ 302114 | 10975761617.9122 
+(1 row)
+
+### 6a. То же по времени коммита
+-- SQL: SELECT count(*) AS rows FROM silver.lakehouse.fct_order_lines FOR TIMESTAMP AS OF TIMESTAMP '2026-10-17 15:45:39.314 UTC'
+  rows  
+--------
+ 302114 
+(1 row)
+
+### 7. Восстановление: откат указателя таблицы на снапшот GOOD (данные не копируются)
+-- SQL: ALTER TABLE silver.lakehouse.fct_order_lines EXECUTE rollback_to_snapshot(8706057299756576312)
+
+### 7a. После отката
+-- SQL: SELECT count(*) AS rows, sum(net_revenue) AS revenue FROM silver.lakehouse.fct_order_lines
+  rows  |     revenue      
+--------+------------------
+ 302114 | 10975761617.9122 
+(1 row)
+
+### 8. История снапшотов
+-- SQL: SELECT h.made_current_at, h.snapshot_id, h.is_current_ancestor, s.operation FROM silver.lakehouse."fct_order_lines$history" h JOIN silver.lakehouse."fct_order_lines$snapshots" s USING (snapshot_id) ORDER BY h.made_current_at
+
+### 8. История снапшотов (is_current_ancestor=false у ошибочного delete — он выпал из линии таблицы)
+       made_current_at       |     snapshot_id     | is_current_ancestor | operation 
+-----------------------------+---------------------+---------------------+-----------
+ 2026-10-17 15:23:17.565 UTC | 8034425915360202040 | true                | append    
+ 2026-10-17 15:45:39.314 UTC | 8706057299756576312 | true                | overwrite 
+ 2026-10-17 15:45:49.987 UTC | 5904699837544924034 | false               | delete    
+(3 rows)

@@ -1,0 +1,5 @@
+      diff      | rows 
+----------------+------
+ gold_minus_ref |    0 
+ ref_minus_gold |    0 
+(2 rows)

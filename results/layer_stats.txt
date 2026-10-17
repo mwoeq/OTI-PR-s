@@ -1,0 +1,9 @@
+ layer  |         tbl          |   rows   | files |   mb   
+--------+----------------------+----------+-------+--------
+ gold   | q3_shipping_priority |       10 |     1 |    0.0 
+ silver | fct_order_lines      |   302114 |     1 |    4.7 
+ silver | dim_customer         |  1500000 |     1 |   12.4 
+ bronze | customer             |  1500000 |     3 |   78.0 
+ bronze | orders               | 15000000 |     8 |  365.7 
+ bronze | lineitem             | 59986052 |     8 | 1453.0 
+(6 rows)
